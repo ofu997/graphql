@@ -35,12 +35,13 @@ const getRepositoryOfOrganization = `
 `;
 
 // will change from template literal variable to () => template literal variable
-const getIssuesOfRepository = `
+// tip: double quotes needed
+const getIssuesOfRepositoryQuery = (organization, repository) =>`
 {
-  organization(login: "the-road-to-learn-react") {
+  organization(login: "${organization}") {
     name
     url
-    repository(name: "the-road-to-learn-react") {
+    repository(name: "${repository}") {
       name
       url
       issues(last: 5) {
@@ -57,6 +58,82 @@ const getIssuesOfRepository = `
 }
 `;
 
+// refactor the query variable again to a template literal that defines inline variables
+const GET_ISSUES_OF_REPOSITORY = `
+query ($organization: String!, $repository: String!, $cursor: String) {
+  organization(login: $organization) {
+    name
+    url
+    repository(name: $repository) { 
+      name
+      url
+      issues(first: 5, after: $cursor, states: [OPEN]) {
+        edges {
+          node {
+            id
+            title
+            url
+            reactions(last: 10) {
+              edges {
+                node {
+                  id
+                  content
+                }
+              }
+            }
+          }
+        }
+        totalCount
+        pageInfo {
+          endCursor
+          hasNextPage
+        }
+      }
+    }
+  }
+}
+`;
+
+
+const getIssuesOfRepository = (path, cursor) => {
+  const [organization, repository] = path.split('/');
+  return axiosGHGQL.post('', {
+    query: GET_ISSUES_OF_REPOSITORY,
+    variables: { organization, repository, cursor }, 
+  });
+};
+
+// const resolveIssuesQuery = queryResult => () => ({
+//   organization: queryResult.data.data.organization,
+//   errors: queryResult.data.errors,
+// });
+
+const resolveIssuesQuery = (queryResult, cursor) => state => {
+  const { data, errors } = queryResult.data;
+  if (!cursor) {
+    return {
+    organization: data.organization,
+    errors,
+    };
+  }
+  const { edges: oldIssues } = state.organization.repository.issues;
+  const { edges: newIssues } = data.organization.repository.issues;
+  const updatedIssues = [...oldIssues, ...newIssues];
+  return {
+    organization: {
+      ...data.organization,
+      repository: {
+        ...data.organization.repository,
+        issues: {
+        ...data.organization.repository.issues,
+        edges: updatedIssues,
+        },
+      },
+    },
+    errors,
+  };
+}
+
 const title = 'React GraphQL Github Client'; 
 
 class App extends React.Component {
@@ -66,24 +143,27 @@ class App extends React.Component {
     errors: null,
     };
     componentDidMount() {
-      this.onFetchFromGitHub();
+      this.onFetchFromGitHub(this.state.path);
     }
     onChange = event => {
     this.setState({ path: event.target.value });
     };
     onSubmit = event => {
-    // fetch data
-    event.preventDefault();
+      this.onFetchFromGitHub(this.state.path);
+      event.preventDefault();
   };  
-  onFetchFromGitHub = () => {
-    axiosGHGQL
-    .post('', { query: getIssuesOfRepository })
-    .then(result => 
-      this.setState(() => ({
-        organization: result.data.data.organization,
-        errors: result.data.errors,
-      })),      
+  onFetchFromGitHub = (path, cursor) => {
+    getIssuesOfRepository(path, cursor).then(queryResult => 
+      this.setState(
+        resolveIssuesQuery(queryResult, cursor), 
+      ),      
     );      
+  };
+  onFetchMoreIssues = () => {
+    const {
+      endCursor,
+      } = this.state.organization.repository.issues.pageInfo;
+      this.onFetchFromGitHub(this.state.path, endCursor);
   };
 
   render() {
@@ -110,6 +190,7 @@ class App extends React.Component {
           <Organization 
             organization = { organization } 
             errors = { errors } 
+            onFetchMoreIssues = { this.onFetchMoreIssues }
           />
           : <p>No information yet</p>
         }
@@ -118,12 +199,16 @@ class App extends React.Component {
   }
 } // App
 
-const Organization = ({ organization, errors }) => {
+const Organization = ({ organization, errors, onFetchMoreIssues, }) => {
   if (errors) {
     return(
       <p>
         <strong>Something went wrong:</strong>
-        {errors.map(error => error.message).join(' ')}
+        {
+          errors.map(
+            error => error.message
+          ).join(' ')
+        }
       </p>
     )
   }
@@ -136,12 +221,13 @@ const Organization = ({ organization, errors }) => {
       </p>
       <Repository 
         repository = { organization.repository }
+        onFetchMoreIssues = { onFetchMoreIssues }
       />
     </div>
   )
 } // Organization
 
-const Repository = ({ repository }) => 
+const Repository = ({ repository, onFetchMoreIssues, }) => 
   <div>
     <p>
       <strong>In Repository: </strong>
@@ -150,11 +236,24 @@ const Repository = ({ repository }) =>
 
     <ul>
       {
-        repository.issues.edges.map(issue => (
-          <li key={issue.node.id}>
-            <a href={issue.node.url}>{issue.node.title}</a>
-          </li>
-        ))        
+        repository.issues.edges.map(
+          issue => (
+            <li key = { issue.node.id }>
+              <a href = { issue.node.url }>{ issue.node.title }</a>
+              <ul>
+                {
+                  issue.node.reactions.edges.map(
+                    reaction => (
+                      <li key = { reaction.node.id }>{ reaction.node.content }</li>
+                    )
+                  )
+                }
+              </ul>       
+              <hr />     
+              <button onClick = { onFetchMoreIssues }>More</button>
+            </li>
+          )
+        )        
       }
     </ul>
   </div>
