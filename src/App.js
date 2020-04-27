@@ -65,8 +65,13 @@ query ($organization: String!, $repository: String!, $cursor: String) {
     name
     url
     repository(name: $repository) { 
+      id
       name
       url
+      stargazers {
+        totalCount
+      }
+      viewerHasStarred
       issues(first: 5, after: $cursor, states: [OPEN]) {
         edges {
           node {
@@ -93,7 +98,6 @@ query ($organization: String!, $repository: String!, $cursor: String) {
   }
 }
 `;
-
 
 const getIssuesOfRepository = (path, cursor) => {
   const [organization, repository] = path.split('/');
@@ -134,6 +138,84 @@ const resolveIssuesQuery = (queryResult, cursor) => state => {
   };
 }
 
+const addStarToRepository = repositoryId => {
+  return axiosGitHubGraphQL.post('', {
+    query: ADD_STAR,
+    variables: { repositoryId },
+  });
+};
+
+const removeStarFromRepository = repositoryId => {
+  return axiosGitHubGraphQL.post('', {
+    query: REMOVE_STAR,
+    variables: { repositoryId },
+  });
+};
+
+const ADD_STAR = `
+  mutation ($repositoryId: ID!) {
+    addStar(input:{starrableId:$repositoryId}) {
+      starrable {
+        viewerHasStarred
+      }
+    }
+  }
+`;
+
+const REMOVE_STAR = `
+  mutation ($repositoryId: ID!) {
+    removeStar(input:{starrableId:$repositoryId}) {
+      starrable {
+        viewerHasStarred
+      }
+    }
+  }
+`;
+
+const resolveAddStarMutation = mutationResult => state => {
+  const {
+    viewerHasStarred,
+  } = mutationResult.data.data.addStar.starrable;
+
+  const { totalCount } = state.organization.repository.stargazers;
+
+  return {
+    ...state,
+    organization: {
+      ...state.organization,
+      repository: {
+      ...state.organization.repository,
+      viewerHasStarred,
+      stargazers: {
+        totalCount: totalCount + 1, 
+      }
+      },
+    },
+  };
+};
+
+const resolveRemoveStarMutation = mutationResult => state => {
+  const {
+    viewerHasStarred,
+  } = mutationResult.data.data.removeStar.starrable;
+
+  const { totalCount } = state.organization.repository.stargazers;
+
+  return {
+    ...state,
+    organization: {
+      ...state.organization,
+      repository: {
+        ...state.organization.repository,
+        viewerHasStarred,
+        stargazers: {
+          totalCount: totalCount - 1,
+        },
+      },
+    },
+  };
+};
+
 const title = 'React GraphQL Github Client'; 
 
 class App extends React.Component {
@@ -141,16 +223,16 @@ class App extends React.Component {
     path: 'the-road-to-learn-react/the-road-to-learn-react',
     organization: null,
     errors: null,
-    };
-    componentDidMount() {
-      this.onFetchFromGitHub(this.state.path);
-    }
-    onChange = event => {
-    this.setState({ path: event.target.value });
-    };
-    onSubmit = event => {
-      this.onFetchFromGitHub(this.state.path);
-      event.preventDefault();
+  };
+  componentDidMount() {
+    this.onFetchFromGitHub(this.state.path);
+  }
+  onChange = event => {
+  this.setState({ path: event.target.value });
+  };
+  onSubmit = event => {
+    this.onFetchFromGitHub(this.state.path);
+    event.preventDefault();
   };  
   onFetchFromGitHub = (path, cursor) => {
     getIssuesOfRepository(path, cursor).then(queryResult => 
@@ -165,6 +247,17 @@ class App extends React.Component {
       } = this.state.organization.repository.issues.pageInfo;
       this.onFetchFromGitHub(this.state.path, endCursor);
   };
+  onStarRepository = (repositoryId, viewerHasStarred) => {
+    if (viewerHasStarred) {
+      removeStarFromRepository(repositoryId).then(mutationResult =>
+        this.setState(resolveRemoveStarMutation(mutationResult)),
+      );
+    } else {    
+      addStarToRepository(repositoryId).then(mutationResult =>
+        this.setState(resolveAddStarMutation(mutationResult)),
+      );
+    };
+  }
 
   render() {
     const { path, organization, errors } = this.state; 
@@ -191,6 +284,7 @@ class App extends React.Component {
             organization = { organization } 
             errors = { errors } 
             onFetchMoreIssues = { this.onFetchMoreIssues }
+            onStarRepository = { this.onStarRepository }
           />
           : <p>No information yet</p>
         }
@@ -199,7 +293,7 @@ class App extends React.Component {
   }
 } // App
 
-const Organization = ({ organization, errors, onFetchMoreIssues, }) => {
+const Organization = ({ organization, errors, onFetchMoreIssues, onStarRepository, }) => {
   if (errors) {
     return(
       <p>
@@ -222,17 +316,25 @@ const Organization = ({ organization, errors, onFetchMoreIssues, }) => {
       <Repository 
         repository = { organization.repository }
         onFetchMoreIssues = { onFetchMoreIssues }
+        onStarRepository = { onStarRepository }
       />
     </div>
   )
 } // Organization
 
-const Repository = ({ repository, onFetchMoreIssues, }) => 
+const Repository = ({ repository, onFetchMoreIssues, onStarRepository }) => 
   <div>
     <p>
       <strong>In Repository: </strong>
       <a href = { repository.url }>{ repository.name }</a>
     </p>
+
+    <button
+      type="button"
+      onClick = { () => onStarRepository(repository.id, repository.viewerHasStarred) }
+    >
+      {repository.viewerHasStarred ? 'Unstar' : 'Star'}
+    </button>
 
     <ul>
       {
@@ -243,13 +345,16 @@ const Repository = ({ repository, onFetchMoreIssues, }) =>
               <ul>
                 {
                   issue.node.reactions.edges.map(
-                    reaction => (
+                    reaction => 
                       <li key = { reaction.node.id }>{ reaction.node.content }</li>
-                    )
                   )
                 }
               </ul>       
               <hr />     
+              {
+                repository.issues.pageInfo.hasNextPage && 
+                  <button onClick={onFetchMoreIssues}>More</button>
+              }              
               <button onClick = { onFetchMoreIssues }>More</button>
             </li>
           )
