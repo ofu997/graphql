@@ -1,8 +1,6 @@
-import React from 'react';
-import logo from './logo.svg';
-import './App.css';
 import axios from 'axios';
-import { token } from './token.js';
+import React from 'react';
+import './App.css';
 const axiosGHGQL = axios.create({
   baseURL: 'https://api.github.com/graphql',
   headers: {
@@ -11,52 +9,6 @@ const axiosGHGQL = axios.create({
     }`,
   },
 });
-
-const GET_ORGANIZATION = `
-{
-  organization(login: "the-road-to-learn-react") {
-    name
-    url
-  }
-}
-`;
-
-const getRepositoryOfOrganization = `
-{
-  organization(login: "the-road-to-learn-react") {
-    name
-    url
-    repository(name: "the-road-to-learn-react") {
-      name
-      url
-    }
-  }
-}
-`;
-
-// will change from template literal variable to () => template literal variable
-// tip: double quotes needed
-const getIssuesOfRepositoryQuery = (organization, repository) =>`
-{
-  organization(login: "${organization}") {
-    name
-    url
-    repository(name: "${repository}") {
-      name
-      url
-      issues(last: 5) {
-        edges {
-          node {
-            id
-            title
-            url
-          }
-        }
-      }
-    }
-  }
-}
-`;
 
 // refactor the query variable again to a template literal that defines inline variables
 const GET_ISSUES_OF_REPOSITORY = `
@@ -106,11 +58,6 @@ const getIssuesOfRepository = (path, cursor) => {
     variables: { organization, repository, cursor }, 
   });
 };
-
-// const resolveIssuesQuery = queryResult => () => ({
-//   organization: queryResult.data.data.organization,
-//   errors: queryResult.data.errors,
-// });
 
 const resolveIssuesQuery = (queryResult, cursor) => state => {
   const { data, errors } = queryResult.data;
@@ -353,7 +300,7 @@ const Repository = ({ repository, onFetchMoreIssues, onStarRepository }) =>
               <hr />     
               {
                 repository.issues.pageInfo.hasNextPage && 
-                  <button onClick={onFetchMoreIssues}>More</button>
+                  <button onClick = { onFetchMoreIssues }>More</button>
               }              
               <button onClick = { onFetchMoreIssues }>More</button>
             </li>
@@ -362,6 +309,5 @@ const Repository = ({ repository, onFetchMoreIssues, onStarRepository }) =>
       }
     </ul>
   </div>
-
 
 export default App;

@@ -25,3 +25,5 @@ yarn-error.log*
 token.js
 Notes.txt
 .env
+
+.vscode/
